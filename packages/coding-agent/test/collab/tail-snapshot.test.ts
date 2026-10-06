@@ -65,7 +65,6 @@ function hostContext(sessionManager: SessionManager, reports: HostReports): Inte
 			model: undefined,
 			thinkingLevel: undefined,
 			subscribe: () => () => {},
-			subscribeCommandMetadataChanged: () => () => {},
 			emitNotice: (_level: string, message: string) => reports.notices.push(message),
 			promptCustomMessage: () => {
 				reports.prompted();
