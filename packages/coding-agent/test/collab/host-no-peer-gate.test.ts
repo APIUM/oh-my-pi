@@ -55,6 +55,7 @@ function makeFixture(): Fixture {
 				fixture.emit = cb;
 				return () => {};
 			},
+			subscribeCommandMetadataChanged: () => () => {},
 			emitNotice: () => {},
 			promptCustomMessage: () => Promise.resolve(),
 			abort: () => Promise.resolve(),
