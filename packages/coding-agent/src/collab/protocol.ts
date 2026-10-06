@@ -12,6 +12,7 @@ import type {
 	BusChannel,
 	CollabUiRequest,
 	GuestFrame,
+	HistoryWindow,
 	ParsedCollabLink,
 	Participant,
 	AgentSnapshot as WireAgentSnapshot,
@@ -28,11 +29,13 @@ import type { AgentSessionEvent } from "../session/agent-session";
 import type { SessionEntry, SessionHeader } from "../session/session-entries";
 
 export type {
+	CollabElided,
 	CollabPromptDetails,
 	CollabUiRequest,
 	CollabUiRequestDraft,
 	CollabUiResponseValue,
 	CollabUiSelectItem,
+	HistoryWindow,
 	ParsedCollabLink,
 	RelayControlMessage,
 	RelayControlToGuest,
@@ -52,7 +55,7 @@ export type { CollabSessionState };
  * that serialize into those shapes.
  */
 export type CollabFrame =
-	// guest -> host (hello/abort/agent-cmd/fetch-transcript/ui-response are taken verbatim from the wire grammar)
+	// guest -> host (hello/abort/agent-cmd/fetch-*/ui-response are taken verbatim from the wire grammar)
 	| Exclude<GuestFrame, { t: "prompt" }>
 	| { t: "prompt"; text: string; images?: ImageContent[] }
 	// host -> guest
@@ -71,6 +74,8 @@ export type CollabFrame =
 			entryCount: number;
 			/** True when this peer joined through a read-only (view) link. */
 			readOnly?: boolean;
+			/** Present only when the host honoured `hello.snapshot` (tail mode). */
+			history?: HistoryWindow;
 	  }
 	/**
 	 * Targeted snapshot fragment delivered after `welcome`. Splits a large
@@ -92,6 +97,18 @@ export type CollabFrame =
 	| { t: "ui-request-end"; reqId: number }
 	/** Targeted reply to fetch-transcript; `error` marks a terminal read failure that guests must surface without hot retrying. */
 	| { t: "transcript"; reqId: number; text: string; newSize: number; error?: string }
+	/** Reply to fetch-history; last frame has `final` plus `startId`/`hasEarlier`; `error` is terminal. */
+	| {
+			t: "history";
+			reqId: number;
+			entries: SessionEntry[];
+			final: boolean;
+			startId?: string | null;
+			hasEarlier?: boolean;
+			error?: string;
+	  }
+	/** Reply to fetch-value: a slice of the original value's JSON from `offset`; `error` is terminal. */
+	| { t: "value"; reqId: number; offset: number; data: string; total: number; final: boolean; error?: string }
 	| { t: "bye"; reason: string }
 	| { t: "error"; message: string };
 
@@ -122,6 +139,15 @@ const SNAPSHOT_CHUNK_FIELDS: FrameFields<"snapshot-chunk"> = {
 	entries: "entries",
 	final: "final",
 };
+const HISTORY_FIELDS: FrameFields<"history"> = {
+	t: "history",
+	reqId: "reqId",
+	entries: "entries",
+	final: "final",
+	startId: "startId",
+	hasEarlier: "hasEarlier",
+	error: "error",
+};
 
 const ENTRY_FRAME_HEAD = `{"t":"${ENTRY_FIELDS.t}","${ENTRY_FIELDS.entry}":`;
 const EVENT_FRAME_HEAD = `{"t":"${EVENT_FIELDS.t}","${EVENT_FIELDS.event}":`;
@@ -146,6 +172,23 @@ export function encodeEventFrame(eventJson: string): EncodedFrame {
 /** `{ t: "snapshot-chunk", entries, final }` from each entry's JSON. */
 export function encodeSnapshotChunk(entryJsons: readonly string[], final: boolean): EncodedFrame {
 	return encodedFrame(`${SNAPSHOT_CHUNK_HEAD}${entryJsons.join(",")}${SNAPSHOT_CHUNK_FINAL}${final}}`);
+}
+
+/**
+ * `{ t: "history", reqId, entries, final }` from each entry's JSON; the final
+ * frame of a page adds `startId`/`hasEarlier` from `window`.
+ */
+export function encodeHistoryFrame(
+	reqId: number,
+	entryJsons: readonly string[],
+	final: boolean,
+	window?: { startId: string | null; hasEarlier: boolean },
+): EncodedFrame {
+	const head = `{"t":"${HISTORY_FIELDS.t}","${HISTORY_FIELDS.reqId}":${reqId},"${HISTORY_FIELDS.entries}":[`;
+	const end = window
+		? `,"${HISTORY_FIELDS.startId}":${JSON.stringify(window.startId)},"${HISTORY_FIELDS.hasEarlier}":${window.hasEarlier}`
+		: "";
+	return encodedFrame(`${head}${entryJsons.join(",")}],"${HISTORY_FIELDS.final}":${final}${end}}`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
